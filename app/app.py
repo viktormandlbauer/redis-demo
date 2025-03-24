@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify
+from datetime import datetime
+from flask import Flask, request, jsonify, send_from_directory
 import redis
 import mysql.connector
 import os
@@ -8,7 +9,7 @@ app = Flask(__name__)
 
 # Redis connection
 redis_client = redis.Redis(
-    host=os.getenv('REDIS_HOST', 'redis'),
+    host=os.getenv('REDIS_HOST', '127.0.0.1'),
     port=int(os.getenv('REDIS_PORT', 6379)),
     password=os.getenv('REDIS_PASSWORD', 'your_redis_password'),
     decode_responses=True
@@ -16,31 +17,26 @@ redis_client = redis.Redis(
 
 # MySQL connection config
 mysql_config = {
-    'host': os.getenv('MYSQL_HOST', 'mysql'),
-    'user': os.getenv('MYSQL_USER', 'app_user'),
-    'password': os.getenv('MYSQL_PASSWORD', 'app_password'),
-    'database': os.getenv('MYSQL_DB', 'myapp_db')
+    'host': os.getenv('MYSQL_HOST', '127.0.0.1'),
+    'user': os.getenv('MYSQL_USER', 'user'),
+    'password': os.getenv('MYSQL_PASSWORD', 'password'),
+    'database': os.getenv('MYSQL_DB', 'airportbase')
 }
 
-# Initialize MySQL table
-def init_db():
-    conn = mysql.connector.connect(**mysql_config)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS items (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            description TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+flights_query = """
+SELECT FLIGHT.FLIGHTNUMBER, dep.NAME as AIRPORTDEPARTURE , dest.NAME as AIRPORTDESTINATION, g.TERMINAL ,g.ACRONYM as GATE,
+DATE_FORMAT(FLIGHT.DEPARTURETIME, '%Y-%m-%dT%TZ') AS DEPARTURETIME FROM FLIGHT
+LEFT JOIN AIRPORT dep ON dep.AIRPORTID = FLIGHT.AIRPORTDEPARTURE
+LEFT JOIN AIRPORT dest ON dest.AIRPORTID = FLIGHT.AIRPORTDESTINATION
+LEFT JOIN GATE g  ON g.GATEID = FLIGHT.GATEID
+"""
 
 # Cache-Aside helper
 def get_cached_or_query(key, query, ttl=300):
     cached = redis_client.get(key)
     if cached:
         return json.loads(cached)
+    
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute(query)
@@ -49,67 +45,75 @@ def get_cached_or_query(key, query, ttl=300):
     conn.close()
     return result
 
-@app.route('/items', methods=['GET'])
+@app.route('/')
+def serve_index():
+    return send_from_directory('static', 'index.html')
+
+@app.route('/flight', methods=['GET'])
 def get_items():
-    cache_key = 'items:all'
-    items = get_cached_or_query(cache_key, 'SELECT * FROM items')
+    cache_key = 'flight:all'
+    items = get_cached_or_query(cache_key, flights_query)
+
     return jsonify(items)
 
-@app.route('/items/<int:item_id>', methods=['GET'])
-def get_item(item_id):
-    cache_key = f'item:{item_id}'
-    item = get_cached_or_query(cache_key, f'SELECT * FROM items WHERE id = {item_id}')
-    return jsonify(item[0] if item else {'error': 'Item not found'}), 200 if item else 404
+# Redis Health Check Endpoint
+@app.route('/health/redis', methods=['GET'])
+def redis_health_check():
+    try:
+        # Test Redis connection with ping
+        redis_client.ping()
+        info = redis_client.info()  # Get Redis server info
+        return jsonify({
+            'status': 'healthy',
+            'redis_connected': True,
+            'uptime_in_seconds': info.get('uptime_in_seconds', 'N/A'),
+            'used_memory_human': info.get('used_memory_human', 'N/A'),
+            'connected_clients': info.get('connected_clients', 'N/A'),
+            'timestamp': datetime.now().isoformat()
+        })
+    except redis.ConnectionError as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'redis_connected': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 503  # Service Unavailable
 
-@app.route('/items', methods=['POST'])
-def create_item():
-    data = request.get_json()
-    name = data.get('name')
-    description = data.get('description')
-    
-    conn = mysql.connector.connect(**mysql_config)
-    cursor = conn.cursor()
-    cursor.execute('INSERT INTO items (name, description) VALUES (%s, %s)', (name, description))
-    conn.commit()
-    item_id = cursor.lastrowid
-    conn.close()
-    
-    # Invalidate cache
-    redis_client.delete('items:all')
-    return jsonify({'id': item_id, 'name': name, 'description': description}), 201
-
-@app.route('/items/<int:item_id>', methods=['PUT'])
-def update_item(item_id):
-    data = request.get_json()
-    name = data.get('name')
-    description = data.get('description')
-    
-    conn = mysql.connector.connect(**mysql_config)
-    cursor = conn.cursor()
-    cursor.execute('UPDATE items SET name = %s, description = %s WHERE id = %s', (name, description, item_id))
-    conn.commit()
-    affected = cursor.rowcount
-    conn.close()
-    
-    # Invalidate cache
-    redis_client.delete('items:all')
-    redis_client.delete(f'item:{item_id}')
-    return jsonify({'message': 'Updated' if affected else 'Item not found'}), 200 if affected else 404
-
-@app.route('/items/<int:item_id>', methods=['DELETE'])
-def delete_item(item_id):
-    conn = mysql.connector.connect(**mysql_config)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM items WHERE id = %s', (item_id,))
-    conn.commit()
-    affected = cursor.rowcount
-    conn.close()
-    
-    # Invalidate cache
-    redis_client.delete('items:all')
-    redis_client.delete(f'item:{item_id}')
-    return jsonify({'message': 'Deleted' if affected else 'Item not found'}), 200 if affected else 404
+# MySQL Health Check Endpoint
+@app.route('/health/mysql', methods=['GET'])
+def mysql_health_check():
+    try:
+        # Test MySQL connection
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # Get some basic server info
+        cursor.execute("SHOW VARIABLES LIKE 'version'")
+        version = cursor.fetchone()[1]
+        
+        cursor.execute("SHOW STATUS LIKE 'Uptime'")
+        uptime = cursor.fetchone()[1]
+        
+        cursor.execute("SELECT DATABASE()")
+        current_db = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'mysql_connected': True,
+            'version': version,
+            'uptime_in_seconds': uptime,
+            'current_database': current_db,
+            'timestamp': datetime.now().isoformat()
+        })
+    except mysql.connector.Error as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'mysql_connected': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 503  # Service Unavailable
 
 if __name__ == '__main__':
-    init_db()  # Initialize DB on startup
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', debug=True, port=5000)

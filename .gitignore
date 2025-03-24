@@ -1,7 +1,12 @@
-mysql-data
-redis-data
+# Exclude persistent data but keep folder structure
+mysql-data/*
+redis-data/*
+
+# Exclude virtual environment
 app/__pycache__
 app/include
 app/lib
 app/bin
 app/pyvenv.cfg
+
+.DS_Store

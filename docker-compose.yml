@@ -1,23 +1,23 @@
-version: '3.8'
-
 services:
   redis:
     image: redis:latest
-    container_name: redis
+    container_name: demo-redis
     ports:
-      - "6379:6379"  # Expose Redis port to host (optional)
-    command: redis-server --requirepass "your_redis_password"  # Optional: Add password
+      - "6379:6379"
+    command: redis-server --requirepass "your_redis_password"
     volumes:
-      - redis-data:/data  # Persist Redis data
+      - redis-data:/data
 
   mysql:
-    image: mysql:latest
-    container_name: mysql
+    container_name: airportbase
+    build:
+      context: db
+      dockerfile: Dockerfile
     environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: myapp_db
-      MYSQL_USER: app_user
-      MYSQL_PASSWORD: app_password
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: airportbase
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
     ports:
       - "3306:3306"
     volumes:
@@ -27,20 +27,20 @@ services:
     build:
       context: ./app
       dockerfile: Dockerfile
-    container_name: flask_app
+    container_name: demo-backend
     ports:
       - "5000:5000"
     depends_on:
       - redis
       - mysql
     environment:
-      - REDIS_HOST=redis
+      - REDIS_HOST=demo-redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=your_redis_password
       - MYSQL_HOST=mysql
-      - MYSQL_USER=app_user
-      - MYSQL_PASSWORD=app_password
-      - MYSQL_DB=myapp_db
+      - MYSQL_USER=user
+      - MYSQL_PASSWORD=password
+      - MYSQL_DB=airportbase
     volumes:
       - ./app:/app
 

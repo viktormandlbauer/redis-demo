@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flight Data Display</title>
+</head>
+<body>
+    <div>
+        <h1>Flight Data</h1>
+        <div id="loading">Loading flight data...</div>
+        <div id="error"></div>
+        <table id="flightTable">
+            <thead>
+                <tr>
+                    <th>FLIGHTNUMBER</th>
+                    <th>AIRPORTDEPARTURE</th>
+                    <th>AIRPORTDESTINATION</th>
+                    <th>Departure Time</th>
+                    <th>Terminal</th>
+                    <th>Gate</th>
+                </tr>
+            </thead>
+            <tbody id="flightDataBody"></tbody>
+        </table>
+    </div>
+
+    <div class="status-container">
+        <h2>System Status</h2>
+        <div id="redisStatus">Redis: Checking...</div>
+        <div id="mysqlStatus">MySQL: Checking...</div>
+    </div>
+
+    <script src="/static/script.js"></script>
+    <script src="/static/status.js"></script>
+</body>
+</html>
