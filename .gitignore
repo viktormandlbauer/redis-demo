@@ -1,0 +1,7 @@
+mysql-data
+redis-data
+app/__pycache__
+app/include
+app/lib
+app/bin
+app/pyvenv.cfg
