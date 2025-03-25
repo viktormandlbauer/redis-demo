@@ -57,7 +57,7 @@ def before_request_func():
     """
     cache_key = 'ip:' + request.remote_addr
     redis_client.incr(cache_key)
-    redis_client.expire(cache_key, 5)
+    redis_client.expire(cache_key, 60)
     if int(redis_client.get(cache_key)) > 100:
         return jsonify({'error': 'Rate limit exceeded'}), 429
 
