@@ -1,8 +1,7 @@
 // script.js
 document.addEventListener('DOMContentLoaded', function() {
     fetchStatuses();
-    setInterval(fetchStatuses, 1000);
-    
+    setInterval(fetchStatuses, 10000);
     fetchFlightData();
 });
 

@@ -8,8 +8,9 @@ async function fetchStatuses() {
         if (!redisResponse.ok) throw new Error('Redis health check failed');
         const redisData = await redisResponse.json();
         
-        redisStatusDiv.textContent = `Redis: ${redisData.status} (Memory: ${redisData.used_memory_human}, Uptime: ${formatSeconds(redisData.uptime_in_seconds)})`;
+        redisStatusDiv.textContent = `Redis: ${redisData.status} (Memory: ${redisData.used_memory_human}, Uptime: ${formatSeconds(redisData.uptime_in_seconds)}), Connected Clients: ${redisData.connected_clients}`;
         redisStatusDiv.className = redisData.status === 'healthy' ? 'healthy' : 'unhealthy';
+        
     } catch (error) {
         redisStatusDiv.textContent = `Redis: Error - ${error.message}`;
         redisStatusDiv.className = 'unhealthy';

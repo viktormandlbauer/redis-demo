@@ -1,5 +1,5 @@
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 import redis
 import mysql.connector
 import os
@@ -32,7 +32,7 @@ LEFT JOIN GATE g  ON g.GATEID = FLIGHT.GATEID
 """
 
 # Cache-Aside helper
-def get_cached_or_query(key, query, ttl=300):
+def get_cached_or_query(key, query, ttl=60):
     cached = redis_client.get(key)
     if cached:
         return json.loads(cached)
@@ -41,7 +41,9 @@ def get_cached_or_query(key, query, ttl=300):
     cursor = conn.cursor(dictionary=True)
     cursor.execute(query)
     result = cursor.fetchall()
+    
     redis_client.setex(key, ttl, json.dumps(result))
+
     conn.close()
     return result
 
@@ -49,12 +51,29 @@ def get_cached_or_query(key, query, ttl=300):
 def serve_index():
     return send_from_directory('static', 'index.html')
 
+@app.before_request
+def before_request_func():
+    """Rate limit the requests
+    """
+    cache_key = 'ip:' + request.remote_addr
+    redis_client.incr(cache_key)
+    redis_client.expire(cache_key, 5)
+    if int(redis_client.get(cache_key)) > 100:
+        return jsonify({'error': 'Rate limit exceeded'}), 429
+
 @app.route('/flight', methods=['GET'])
-def get_items():
+def get_all_flights():
     cache_key = 'flight:all'
     items = get_cached_or_query(cache_key, flights_query)
 
     return jsonify(items)
+
+@app.route('/flight/<flightnumber>', methods=['GET'])
+def get_flight(flightnumber):
+    cache_key = f'flight:{flightnumber}'
+    query = f"{flights_query} WHERE FLIGHT.FLIGHTNUMBER = '{flightnumber}'"
+    item = get_cached_or_query(cache_key, query)
+    return jsonify(item)
 
 # Redis Health Check Endpoint
 @app.route('/health/redis', methods=['GET'])
