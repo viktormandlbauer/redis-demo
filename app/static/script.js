@@ -2,7 +2,12 @@
 document.addEventListener('DOMContentLoaded', function() {
     fetchStatuses();
     setInterval(fetchStatuses, 10000);
+    
     fetchFlightData();
+    setInterval(fetchFlightData, 10000);
+    
+    fetchSessionData();
+    setInterval(fetchSessionData, 10000);
 });
 
 // Helper function to format date and time
@@ -23,6 +28,35 @@ function formatSeconds(seconds) {
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     return `${days}d ${hours}h ${minutes}m`;
+}
+
+async function fetchSessionData() {
+    const sessionDataDisplay = document.getElementById('sessionDataDisplay');
+    try {
+
+        // Fetch data from the /session endpoint
+        const response = await fetch('/session', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const sessionData = await response.json();
+        
+        // Display session data
+        sessionDataDisplay.innerHTML = `
+            <pre>${JSON.stringify(sessionData, null, 2)}</pre>
+        `;
+
+
+    } catch (error) {
+        console.error('Error fetching session data:', error);
+    }
 }
 
 async function fetchFlightData() {
@@ -80,15 +114,35 @@ async function fetchFlightData() {
     }
 }
 
-// Helper function to format date and time
-function formatDateTime(dateTime) {
-    if (!dateTime) return 'N/A';
+async function submitSessionData(event) {
+    event.preventDefault();
     
-    const date = new Date(dateTime);
-    if (isNaN(date.getTime())) return dateTime; // Return original string if invalid date
+    const form = document.getElementById('sessionForm');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData);
     
-    return date.toLocaleString('en-US', {
-        dateStyle: 'medium',
-        timeStyle: 'short'
-    });
+    try {
+        const response = await fetch('/session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+        
+        const result = await response.json();
+        document.getElementById('sessionFormMessage').textContent = 
+            response.ok ? 'Session data submitted successfully!' : 
+            `Error: ${result.error}`;
+        
+        if (response.ok) {
+            form.reset();
+        }
+    } catch (error) {
+        console.error('Error submitting session data:', error);
+        document.getElementById('sessionFormMessage').textContent = 
+            'Error submitting session data. Please try again.';
+    }
+
+    fetchSessionData();
 }

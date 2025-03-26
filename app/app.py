@@ -1,9 +1,10 @@
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory, make_response
 import redis
 import mysql.connector
 import os
 import json
+import uuid
 
 app = Flask(__name__)
 
@@ -31,6 +32,33 @@ LEFT JOIN AIRPORT dest ON dest.AIRPORTID = FLIGHT.AIRPORTDESTINATION
 LEFT JOIN GATE g  ON g.GATEID = FLIGHT.GATEID
 """
 
+# Session configuration
+SESSION_COOKIE_NAME = 'redis_session_cookie'
+SESSION_TTL = 1800
+
+def get_session(resp = None):
+    """Get session ID from cookie or create new one"""
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        if resp:
+            resp.set_cookie(SESSION_COOKIE_NAME, session_id, max_age=SESSION_TTL, httponly=True)
+    return session_id
+        
+def load_session(session_id):
+    try:
+        data = redis_client.get(f"session:{session_id}")
+        return json.loads(data) if data else {}
+    except Exception as e:
+        app.logger.error(f"Redis error: {e}")
+        return {}
+    
+def save_session(session_id, data, ttl=SESSION_TTL):
+    try:
+        redis_client.setex(f"session:{session_id}", ttl, json.dumps(data))
+    except Exception as e:
+        app.logger.error(f"Redis save error: {e}")
+
 # Cache-Aside helper
 def get_cached_or_query(key, query, ttl=60):
     cached = redis_client.get(key)
@@ -47,19 +75,21 @@ def get_cached_or_query(key, query, ttl=60):
     conn.close()
     return result
 
-@app.route('/')
-def serve_index():
-    return send_from_directory('static', 'index.html')
-
 @app.before_request
 def before_request_func():
-    """Rate limit the requests
-    """
+
+    # Rate limiting
     cache_key = 'ip:' + request.remote_addr
     redis_client.incr(cache_key)
-    redis_client.expire(cache_key, 60)
+    redis_client.expire(cache_key, 5)
     if int(redis_client.get(cache_key)) > 100:
-        return jsonify({'error': 'Rate limit exceeded'}), 429
+        return jsonify({'error': 'Rate limit exceeded'}), 429    
+
+@app.route('/')
+def serve_index():
+    resp = make_response(send_from_directory('static', 'index.html'))
+    get_session(resp)
+    return resp
 
 @app.route('/flight', methods=['GET'])
 def get_all_flights():
@@ -68,12 +98,37 @@ def get_all_flights():
 
     return jsonify(items)
 
-@app.route('/flight/<flightnumber>', methods=['GET'])
-def get_flight(flightnumber):
-    cache_key = f'flight:{flightnumber}'
-    query = f"{flights_query} WHERE FLIGHT.FLIGHTNUMBER = '{flightnumber}'"
-    item = get_cached_or_query(cache_key, query)
-    return jsonify(item)
+@app.route('/session', methods=['POST'])
+def submit_session_data():
+    session_id = get_session()
+    session_data = load_session(session_id)
+    
+    try:
+        data = request.get_json()
+        required_fields = ['sessionData']
+        
+        if not all(field in data for field in required_fields):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        session_data['data'] = {
+            'key': data['sessionData']
+        }
+        
+        session_data['updated_at'] = datetime.now().isoformat()
+        
+        save_session(session_id, session_data)
+        
+        return make_response(jsonify({'message': 'Session data stored successfully'}), 200)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/session', methods=['GET'])
+def get_session_data():
+    session_id = get_session()
+    session_data = load_session(session_id)
+    
+    return jsonify(session_data)
 
 # Redis Health Check Endpoint
 @app.route('/health/redis', methods=['GET'])
